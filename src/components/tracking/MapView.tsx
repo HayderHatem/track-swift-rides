@@ -1,8 +1,10 @@
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Driver } from '@/types/tracking';
 import { Map as MapIcon, Navigation } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 
 interface MapViewProps {
   drivers: Driver[];
@@ -11,7 +13,7 @@ interface MapViewProps {
 
 // User input field for their own Mapbox token for demonstration purposes
 const MapboxTokenInput = ({ onTokenSubmit }: { onTokenSubmit: (token: string) => void }) => {
-  const [token, setToken] = React.useState('');
+  const [token, setToken] = useState('');
   
   return (
     <div className="p-4 bg-muted rounded-md">
@@ -40,10 +42,10 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markers = useRef<{ [key: string]: mapboxgl.Marker }>({});
-  const [mapboxToken, setMapboxToken] = React.useState<string | null>(
+  const [mapboxToken, setMapboxToken] = useState<string | null>(
     localStorage.getItem('mapbox_token')
   );
-  const [mapLoaded, setMapLoaded] = React.useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
 
   const initializeMap = () => {
     if (!mapboxToken || !mapContainer.current) return;
@@ -55,7 +57,7 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
       
       if (map.current) return;
       
-      map.current = new mapboxgl.Map({
+      map.current = new mapboxgl.default.Map({
         container: mapContainer.current,
         style: 'mapbox://styles/mapbox/streets-v11',
         center: drivers.length > 0 
@@ -64,7 +66,7 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
         zoom: 12
       });
 
-      map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
+      map.current.addControl(new mapboxgl.default.NavigationControl(), 'top-right');
       
       map.current.on('load', () => {
         setMapLoaded(true);
@@ -111,23 +113,25 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
         `;
         
         // Create the marker
-        markers.current[id] = new mapboxgl.Marker(el)
-          .setLngLat([location.lng, location.lat])
-          .addTo(map.current);
-          
-        // Add popup
-        new mapboxgl.Popup({ offset: 25, closeButton: false })
-          .setHTML(`
-            <div>
-              <strong>${driver.name}</strong>
-              <div>${driver.vehicle}</div>
-              ${driver.currentDelivery ? 
-                `<div class="text-sm">Delivering to: ${driver.currentDelivery.address}</div>` : 
-                '<div class="text-sm">Not on delivery</div>'}
-            </div>
-          `)
-          .setLngLat([location.lng, location.lat])
-          .addTo(map.current);
+        import('mapbox-gl').then((mapboxgl) => {
+          markers.current[id] = new mapboxgl.default.Marker(el)
+            .setLngLat([location.lng, location.lat])
+            .addTo(map.current as mapboxgl.Map);
+            
+          // Add popup
+          new mapboxgl.default.Popup({ offset: 25, closeButton: false })
+            .setHTML(`
+              <div>
+                <strong>${driver.name}</strong>
+                <div>${driver.vehicle}</div>
+                ${driver.currentDelivery ? 
+                  `<div class="text-sm">Delivering to: ${driver.currentDelivery.address}</div>` : 
+                  '<div class="text-sm">Not on delivery</div>'}
+              </div>
+            `)
+            .setLngLat([location.lng, location.lat])
+            .addTo(map.current as mapboxgl.Map);
+        });
       } else {
         // Update existing marker
         markers.current[id].setLngLat([location.lng, location.lat]);
