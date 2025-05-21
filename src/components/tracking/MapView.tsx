@@ -42,10 +42,14 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markers = useRef<{ [key: string]: mapboxgl.Marker }>({});
+  const markerAnimations = useRef<{ [key: string]: number }>({});
   const [mapboxToken, setMapboxToken] = useState<string | null>(
     localStorage.getItem('mapbox_token')
   );
   const [mapLoaded, setMapLoaded] = useState(false);
+
+  // Baghdad, Iraq coordinates as default
+  const defaultCenter = [44.3661, 33.3152]; // [lng, lat]
 
   const initializeMap = () => {
     if (!mapboxToken || !mapContainer.current) return;
@@ -62,7 +66,7 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
         style: 'mapbox://styles/mapbox/streets-v11',
         center: drivers.length > 0 
           ? [drivers[0].location.lng, drivers[0].location.lat]
-          : [-74.006, 40.7128],
+          : defaultCenter,
         zoom: 12
       });
 
@@ -87,12 +91,61 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
     }
 
     return () => {
+      // Cancel all animations
+      Object.values(markerAnimations.current).forEach(id => {
+        cancelAnimationFrame(id);
+      });
+      
       if (map.current) {
         map.current.remove();
         map.current = null;
       }
     };
   }, [mapboxToken]);
+
+  // Function to smoothly animate a marker from one position to another
+  const animateMarkerMovement = (
+    markerId: string, 
+    startLng: number, 
+    startLat: number, 
+    endLng: number, 
+    endLat: number, 
+    duration: number = 3000
+  ) => {
+    if (!markers.current[markerId]) return;
+    
+    // Cancel any existing animation for this marker
+    if (markerAnimations.current[markerId]) {
+      cancelAnimationFrame(markerAnimations.current[markerId]);
+    }
+    
+    const marker = markers.current[markerId];
+    const startTime = performance.now();
+    
+    const animate = (currentTime: number) => {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // Use easing function for smoother movement
+      const easeProgress = easeInOut(progress);
+      
+      const currentLng = startLng + (endLng - startLng) * easeProgress;
+      const currentLat = startLat + (endLat - startLat) * easeProgress;
+      
+      marker.setLngLat([currentLng, currentLat]);
+      
+      if (progress < 1) {
+        markerAnimations.current[markerId] = requestAnimationFrame(animate);
+      }
+    };
+    
+    markerAnimations.current[markerId] = requestAnimationFrame(animate);
+  };
+  
+  // Easing function for smooth animation
+  const easeInOut = (t: number): number => {
+    return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+  };
 
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
@@ -133,8 +186,15 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
             .addTo(map.current as mapboxgl.Map);
         });
       } else {
-        // Update existing marker
-        markers.current[id].setLngLat([location.lng, location.lat]);
+        // Animate marker to new position
+        const currentPos = markers.current[id].getLngLat();
+        animateMarkerMovement(
+          id, 
+          currentPos.lng, 
+          currentPos.lat, 
+          location.lng, 
+          location.lat
+        );
       }
     });
 
@@ -143,6 +203,12 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
       if (!drivers.find(d => d.id === id)) {
         markers.current[id].remove();
         delete markers.current[id];
+        
+        // Cancel any ongoing animation
+        if (markerAnimations.current[id]) {
+          cancelAnimationFrame(markerAnimations.current[id]);
+          delete markerAnimations.current[id];
+        }
       }
     });
     

@@ -28,16 +28,20 @@ const DriverTracking = () => {
 
   // Simulate initial drivers data
   useEffect(() => {
+    // Baghdad, Iraq coordinates
+    const baghdadLat = 33.3152;
+    const baghdadLng = 44.3661;
+    
     const mockDrivers: Driver[] = [
       {
         id: '1',
         name: 'John Doe',
         vehicle: 'Delivery Van',
         status: 'active',
-        location: { lat: 40.7128, lng: -74.006 },
+        location: { lat: baghdadLat, lng: baghdadLng },
         currentDelivery: {
           id: 'del-123',
-          address: '123 Main St, New York, NY',
+          address: 'Karrada, Baghdad, Iraq',
           estimatedArrival: new Date(Date.now() + 15 * 60000).toISOString() // 15 minutes from now
         }
       },
@@ -46,10 +50,10 @@ const DriverTracking = () => {
         name: 'Jane Smith',
         vehicle: 'Scooter',
         status: 'active',
-        location: { lat: 40.7148, lng: -74.009 },
+        location: { lat: baghdadLat + 0.01, lng: baghdadLng + 0.01 },
         currentDelivery: {
           id: 'del-456',
-          address: '456 Park Ave, New York, NY',
+          address: 'Mansour, Baghdad, Iraq',
           estimatedArrival: new Date(Date.now() + 8 * 60000).toISOString() // 8 minutes from now
         }
       },
@@ -58,14 +62,14 @@ const DriverTracking = () => {
         name: 'Dave Wilson',
         vehicle: 'Truck',
         status: 'inactive',
-        location: { lat: 40.7168, lng: -74.002 },
+        location: { lat: baghdadLat - 0.01, lng: baghdadLng + 0.02 },
         currentDelivery: null
       }
     ];
     
     setDrivers(mockDrivers);
 
-    // Simulate driver movement
+    // Smooth driver movement using interpolation
     const moveInterval = setInterval(() => {
       setDrivers(prevDrivers => 
         prevDrivers.map(driver => {
@@ -75,8 +79,12 @@ const DriverTracking = () => {
           const latChange = (Math.random() - 0.5) * 0.001;
           const lngChange = (Math.random() - 0.5) * 0.001;
           
+          // Store current location as previous location for smooth movement
+          const prevLocation = { ...driver.location };
+          
           return {
             ...driver,
+            prevLocation,
             location: {
               lat: driver.location.lat + latChange,
               lng: driver.location.lng + lngChange
