@@ -43,6 +43,9 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
   const map = useRef<mapboxgl.Map | null>(null);
   const markers = useRef<{ [key: string]: mapboxgl.Marker }>({});
   const markerAnimations = useRef<{ [key: string]: number }>({});
+  const driverPaths = useRef<{ [key: string]: mapboxgl.GeoJSONSource }>({});
+  const driverPathCoordinates = useRef<{ [key: string]: [number, number][] }>({});
+  
   const [mapboxToken, setMapboxToken] = useState<string | null>(
     localStorage.getItem('mapbox_token')
   );
@@ -74,6 +77,55 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
       
       map.current.on('load', () => {
         setMapLoaded(true);
+        
+        // Initialize path sources and layers for each driver
+        drivers.forEach(driver => {
+          if (!map.current) return;
+          
+          // Initialize the coordinates array if it doesn't exist
+          if (!driverPathCoordinates.current[driver.id]) {
+            driverPathCoordinates.current[driver.id] = [
+              [driver.location.lng, driver.location.lat]
+            ];
+          }
+          
+          // Add a GeoJSON source for the driver's path
+          map.current.addSource(`path-source-${driver.id}`, {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: driverPathCoordinates.current[driver.id]
+              }
+            }
+          });
+          
+          // Save the source reference
+          driverPaths.current[driver.id] = map.current.getSource(`path-source-${driver.id}`) as mapboxgl.GeoJSONSource;
+          
+          // Add a path layer for the driver
+          const color = driver.id === '1' ? '#FF5733' : 
+                        driver.id === '2' ? '#33FF57' : 
+                        driver.id === '3' ? '#3357FF' : '#FFBD33';
+          
+          map.current.addLayer({
+            id: `path-layer-${driver.id}`,
+            type: 'line',
+            source: `path-source-${driver.id}`,
+            layout: {
+              'line-join': 'round',
+              'line-cap': 'round',
+              'visibility': driver.id === selectedDriverId || selectedDriverId === null ? 'visible' : 'none'
+            },
+            paint: {
+              'line-color': color,
+              'line-width': 4,
+              'line-opacity': 0.8
+            }
+          });
+        });
       });
     }).catch(error => {
       console.error('Error loading mapbox-gl:', error);
@@ -102,6 +154,22 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
       }
     };
   }, [mapboxToken]);
+
+  // Update path visibility when selected driver changes
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+    
+    drivers.forEach(driver => {
+      const layerId = `path-layer-${driver.id}`;
+      if (map.current?.getLayer(layerId)) {
+        map.current.setLayoutProperty(
+          layerId,
+          'visibility',
+          driver.id === selectedDriverId || selectedDriverId === null ? 'visible' : 'none'
+        );
+      }
+    });
+  }, [selectedDriverId, mapLoaded, drivers]);
 
   // Function to smoothly animate a marker from one position to another
   const animateMarkerMovement = (
@@ -133,6 +201,29 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
       const currentLat = startLat + (endLat - startLat) * easeProgress;
       
       marker.setLngLat([currentLng, currentLat]);
+      
+      // Update path when the driver moves
+      if (map.current && mapLoaded && driverPaths.current[markerId]) {
+        // Add new point to path coordinates
+        if (!driverPathCoordinates.current[markerId]) {
+          driverPathCoordinates.current[markerId] = [];
+        }
+        
+        // Only add point every 10% of the animation to avoid too many points
+        if (progress % 0.1 < 0.01 || progress === 1) {
+          driverPathCoordinates.current[markerId].push([currentLng, currentLat]);
+          
+          // Update the GeoJSON source with the new coordinates
+          driverPaths.current[markerId].setData({
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: driverPathCoordinates.current[markerId]
+            }
+          });
+        }
+      }
       
       if (progress < 1) {
         markerAnimations.current[markerId] = requestAnimationFrame(animate);
@@ -184,6 +275,51 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
             `)
             .setLngLat([location.lng, location.lat])
             .addTo(map.current as mapboxgl.Map);
+            
+          // Add initial point to path
+          if (!driverPathCoordinates.current[id]) {
+            driverPathCoordinates.current[id] = [[location.lng, location.lat]];
+          }
+          
+          // Create path source and layer if the map is loaded but the path doesn't exist yet
+          if (mapLoaded && map.current && !driverPaths.current[id]) {
+            const color = id === '1' ? '#FF5733' : 
+                          id === '2' ? '#33FF57' : 
+                          id === '3' ? '#3357FF' : '#FFBD33';
+                          
+            // Add a GeoJSON source for the driver's path
+            map.current.addSource(`path-source-${id}`, {
+              type: 'geojson',
+              data: {
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                  type: 'LineString',
+                  coordinates: driverPathCoordinates.current[id]
+                }
+              }
+            });
+            
+            // Save the source reference
+            driverPaths.current[id] = map.current.getSource(`path-source-${id}`) as mapboxgl.GeoJSONSource;
+            
+            // Add a path layer for the driver
+            map.current.addLayer({
+              id: `path-layer-${id}`,
+              type: 'line',
+              source: `path-source-${id}`,
+              layout: {
+                'line-join': 'round',
+                'line-cap': 'round',
+                'visibility': id === selectedDriverId || selectedDriverId === null ? 'visible' : 'none'
+              },
+              paint: {
+                'line-color': color,
+                'line-width': 4,
+                'line-opacity': 0.8
+              }
+            });
+          }
         });
       } else {
         // Animate marker to new position
@@ -203,6 +339,18 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
       if (!drivers.find(d => d.id === id)) {
         markers.current[id].remove();
         delete markers.current[id];
+        
+        // Remove the path layer and source
+        if (map.current && map.current.getLayer(`path-layer-${id}`)) {
+          map.current.removeLayer(`path-layer-${id}`);
+        }
+        
+        if (map.current && map.current.getSource(`path-source-${id}`)) {
+          map.current.removeSource(`path-source-${id}`);
+        }
+        
+        delete driverPaths.current[id];
+        delete driverPathCoordinates.current[id];
         
         // Cancel any ongoing animation
         if (markerAnimations.current[id]) {
