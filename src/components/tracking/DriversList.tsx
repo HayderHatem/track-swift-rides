@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Driver } from '@/types/tracking';
-import { Car, MapPin, Navigation2, Clock } from 'lucide-react';
+import { Car, MapPin, Navigation2, Clock, Phone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
@@ -59,6 +59,13 @@ const DriversList = ({ drivers, onDriverSelect, selectedDriverId }: DriversListP
               <Car className="h-4 w-4 mr-1" />
               <span>{driver.vehicle}</span>
             </div>
+            
+            {driver.phone && (
+              <div className="flex items-center text-sm text-muted-foreground mb-2">
+                <Phone className="h-4 w-4 mr-1" />
+                <span>{driver.phone}</span>
+              </div>
+            )}
             
             {driver.currentDelivery && (
               <>

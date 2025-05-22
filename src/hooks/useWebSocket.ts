@@ -1,11 +1,15 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { toast } from '@/components/ui/sonner';
 
 interface UseWebSocketProps {
   url: string;
   onMessage?: (event: MessageEvent) => void;
   reconnectAttempts?: number;
   reconnectInterval?: number;
+  onOpen?: () => void;
+  onClose?: (event: CloseEvent) => void;
+  onError?: (event: Event) => void;
 }
 
 interface UseWebSocketResult {
@@ -13,6 +17,7 @@ interface UseWebSocketResult {
   lastMessage: MessageEvent | null;
   readyState: number;
   connectionStatus: 'connecting' | 'open' | 'closing' | 'closed';
+  reconnect: () => void;
 }
 
 export const useWebSocket = ({
@@ -20,6 +25,9 @@ export const useWebSocket = ({
   onMessage,
   reconnectAttempts = 5,
   reconnectInterval = 5000,
+  onOpen,
+  onClose,
+  onError
 }: UseWebSocketProps): UseWebSocketResult => {
   const [lastMessage, setLastMessage] = useState<MessageEvent | null>(null);
   const [readyState, setReadyState] = useState<number>(WebSocket.CONNECTING);
@@ -55,9 +63,12 @@ export const useWebSocket = ({
         console.log('WebSocket connection established');
         setReadyState(WebSocket.OPEN);
         reconnectCount.current = 0;
+        toast.success("Connected to driver tracking server");
+        if (onOpen) onOpen();
       };
 
       socket.current.onmessage = (event: MessageEvent) => {
+        console.log('WebSocket message received:', event.data);
         setLastMessage(event);
         if (onMessage) {
           onMessage(event);
@@ -67,11 +78,13 @@ export const useWebSocket = ({
       socket.current.onclose = (event) => {
         console.log('WebSocket connection closed', event);
         setReadyState(WebSocket.CLOSED);
+        if (onClose) onClose(event);
 
         // Attempt to reconnect if not a clean close
         if (!event.wasClean && reconnectCount.current < reconnectAttempts) {
           console.log(`Attempting to reconnect (${reconnectCount.current + 1}/${reconnectAttempts})...`);
           reconnectCount.current += 1;
+          toast.info(`Connection lost. Attempting to reconnect (${reconnectCount.current}/${reconnectAttempts})...`);
           
           if (reconnectTimeoutRef.current) {
             window.clearTimeout(reconnectTimeoutRef.current);
@@ -80,20 +93,34 @@ export const useWebSocket = ({
           reconnectTimeoutRef.current = window.setTimeout(() => {
             connect();
           }, reconnectInterval);
+        } else if (reconnectCount.current >= reconnectAttempts) {
+          toast.error(`Failed to reconnect after ${reconnectAttempts} attempts. Please check your connection.`);
         }
       };
 
       socket.current.onerror = (error) => {
         console.error('WebSocket error:', error);
+        if (onError) onError(error);
+        toast.error("Connection error. Check console for details.");
       };
     } catch (error) {
       console.error('WebSocket connection error:', error);
+      toast.error("Failed to establish WebSocket connection.");
     }
-  }, [url, onMessage, reconnectAttempts, reconnectInterval]);
+  }, [url, onMessage, reconnectAttempts, reconnectInterval, onOpen, onClose, onError]);
+
+  const reconnect = useCallback(() => {
+    if (socket.current) {
+      socket.current.close();
+    }
+    reconnectCount.current = 0;
+    connect();
+  }, [connect]);
 
   const sendMessage = useCallback((message: string | object) => {
     if (!socket.current || socket.current.readyState !== WebSocket.OPEN) {
       console.error('WebSocket is not connected');
+      toast.error("Cannot send message: WebSocket is not connected");
       return;
     }
 
@@ -120,5 +147,6 @@ export const useWebSocket = ({
     lastMessage,
     readyState,
     connectionStatus: getConnectionStatus(),
+    reconnect
   };
 };
