@@ -16,7 +16,8 @@ export interface Driver {
   vehicle: string;
   status: 'active' | 'inactive' | 'break';
   location: Location;
-  phone?: string;  // Added phone field
+  prevLocation?: Location;  // Added prevLocation as an optional property
+  phone?: string;
   currentDelivery: Delivery | null;
 }
 
