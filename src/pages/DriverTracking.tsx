@@ -15,13 +15,15 @@ import { RefreshCcw } from 'lucide-react';
 const DriverTracking = () => {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [selectedDriver, setSelectedDriver] = useState<string | null>(null);
-  const [wsUrl, setWsUrl] = useState<string>('wss://demo.piesocket.com/v3/channel_123?api_key=VCXCEuvhGcBDP7XhiJJUDvR1e1D3eiVjgZ9VRiaV&notify_self');
-  const [inputWsUrl, setInputWsUrl] = useState<string>('');
+  const [wsUrl, setWsUrl] = useState<string>('');  // Start with empty URL to disable WebSocket
+  const [inputWsUrl, setInputWsUrl] = useState<string>('wss://demo.piesocket.com/v3/channel_123?api_key=VCXCEuvhGcBDP7XhiJJUDvR1e1D3eiVjgZ9VRiaV&notify_self');
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [mapType, setMapType] = useState<'mapbox' | 'waze'>('mapbox');
+  const [websocketsEnabled, setWebsocketsEnabled] = useState<boolean>(false);
   
+  // Only initialize WebSocket if websocketsEnabled is true
   const { lastMessage, connectionStatus, reconnect } = useWebSocket({
-    url: wsUrl,
+    url: websocketsEnabled ? wsUrl : '',
     onMessage: (message) => {
       try {
         console.log('Processing WebSocket message:', message.data);
@@ -88,6 +90,7 @@ const DriverTracking = () => {
     }
     setIsConnecting(true);
     setWsUrl(inputWsUrl);
+    setWebsocketsEnabled(true);
     toast.info(`Connecting to ${inputWsUrl}...`);
   };
 
@@ -221,7 +224,13 @@ const DriverTracking = () => {
               <Button 
                 variant="outline" 
                 size="icon" 
-                onClick={reconnect} 
+                onClick={() => {
+                  if (websocketsEnabled) {
+                    reconnect();
+                  } else {
+                    toast.info("WebSockets are currently disabled. Click Connect to enable.");
+                  }
+                }} 
                 disabled={isConnecting}
                 title="Reconnect"
               >
@@ -230,14 +239,17 @@ const DriverTracking = () => {
             </div>
             <div className="mt-2 flex items-center text-sm">
               <div className={`w-2 h-2 rounded-full mr-2 ${
-                connectionStatus === 'open' ? 'bg-green-500' : 
-                connectionStatus === 'connecting' ? 'bg-yellow-500' : 'bg-red-500'
+                websocketsEnabled ? (
+                  connectionStatus === 'open' ? 'bg-green-500' : 
+                  connectionStatus === 'connecting' ? 'bg-yellow-500' : 'bg-red-500'
+                ) : 'bg-gray-500'
               }`}></div>
-              Status: {connectionStatus.charAt(0).toUpperCase() + connectionStatus.slice(1)}
-              {connectionStatus === 'open' && (
+              Status: {websocketsEnabled ? connectionStatus.charAt(0).toUpperCase() + connectionStatus.slice(1) : 'Disabled'}
+              {connectionStatus === 'open' && websocketsEnabled && (
                 <span className="ml-2 text-muted-foreground">Connected to: {wsUrl}</span>
               )}
             </div>
+            <p className="text-xs text-muted-foreground mt-2 italic">WebSocket connection is temporarily disabled. Click Connect to enable.</p>
           </CardContent>
         </Card>
       </div>

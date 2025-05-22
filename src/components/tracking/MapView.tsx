@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState } from 'react';
 import { Driver } from '@/types/tracking';
 import { Map as MapIcon } from 'lucide-react';
@@ -56,6 +55,7 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
   const [showTraffic, setShowTraffic] = useState(true);
   const [showSatellite, setShowSatellite] = useState(false);
   const [activeDriverDetails, setActiveDriverDetails] = useState<string | null>(null);
+  const [mapInitialized, setMapInitialized] = useState(false);
 
   // Baghdad, Iraq coordinates as default
   const defaultCenter = [44.3661, 33.3152]; // [lng, lat]
@@ -92,133 +92,155 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
     };
   }, []);
 
+  // Initialize map with a slight delay to ensure container is properly sized
   const initializeMap = () => {
     if (!mapboxToken || !mapContainer.current) return;
     
-    import('mapbox-gl').then((mapboxgl) => {
-      import('mapbox-gl/dist/mapbox-gl.css');
-      
-      mapboxgl.default.accessToken = mapboxToken;
-      
-      if (map.current) return;
-      
-      map.current = new mapboxgl.default.Map({
-        container: mapContainer.current,
-        style: showSatellite ? 'mapbox://styles/mapbox/satellite-streets-v11' : 'mapbox://styles/mapbox/streets-v11',
-        center: drivers.length > 0 
-          ? [drivers[0].location.lng, drivers[0].location.lat]
-          : defaultCenter,
-        zoom: 12
-      });
+    if (map.current) return; // Avoid re-initializing if map already exists
+    
+    // Add a small delay to ensure the container dimensions are properly set
+    setTimeout(() => {
+      try {
+        console.log('Initializing map...');
+        console.log('Container dimensions:', mapContainer.current?.offsetWidth, mapContainer.current?.offsetHeight);
+        
+        mapboxgl.accessToken = mapboxToken;
+        
+        map.current = new mapboxgl.Map({
+          container: mapContainer.current!,
+          style: showSatellite ? 'mapbox://styles/mapbox/satellite-streets-v11' : 'mapbox://styles/mapbox/streets-v11',
+          center: drivers.length > 0 
+            ? [drivers[0].location.lng, drivers[0].location.lat]
+            : defaultCenter,
+          zoom: 12
+        });
 
-      map.current.addControl(new mapboxgl.default.NavigationControl(), 'bottom-right');
-      
-      map.current.on('load', () => {
-        setMapLoaded(true);
+        map.current.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
         
-        // Add traffic layer if enabled
-        if (showTraffic) {
-          map.current?.addSource('traffic', {
-            type: 'vector',
-            url: 'mapbox://mapbox.mapbox-traffic-v1'
-          });
+        map.current.on('load', () => {
+          console.log('Map loaded successfully');
+          setMapLoaded(true);
+          setMapInitialized(true);
           
-          map.current?.addLayer({
-            'id': 'traffic-data',
-            'type': 'line',
-            'source': 'traffic',
-            'source-layer': 'traffic',
-            'layout': {
-              'line-join': 'round',
-              'line-cap': 'round'
-            },
-            'paint': {
-              'line-width': 2,
-              'line-color': [
-                'match',
-                ['get', 'congestion'],
-                'low', '#4CAF50',      // Green for low traffic
-                'moderate', '#FFEB3B', // Yellow for moderate
-                'heavy', '#FF9800',    // Orange for heavy
-                'severe', '#F44336',   // Red for severe
-                '#4CAF50'              // Default color
-              ]
-            }
-          });
-        }
-        
-        // Initialize path sources and layers for each driver
-        drivers.forEach(driver => {
-          if (!map.current) return;
-          
-          // Initialize the coordinates array if it doesn't exist
-          if (!driverPathCoordinates.current[driver.id]) {
-            driverPathCoordinates.current[driver.id] = [
-              [driver.location.lng, driver.location.lat]
-            ];
+          // Add traffic layer if enabled
+          if (showTraffic) {
+            map.current?.addSource('traffic', {
+              type: 'vector',
+              url: 'mapbox://mapbox.mapbox-traffic-v1'
+            });
+            
+            map.current?.addLayer({
+              'id': 'traffic-data',
+              'type': 'line',
+              'source': 'traffic',
+              'source-layer': 'traffic',
+              'layout': {
+                'line-join': 'round',
+                'line-cap': 'round'
+              },
+              'paint': {
+                'line-width': 2,
+                'line-color': [
+                  'match',
+                  ['get', 'congestion'],
+                  'low', '#4CAF50',      // Green for low traffic
+                  'moderate', '#FFEB3B', // Yellow for moderate
+                  'heavy', '#FF9800',    // Orange for heavy
+                  'severe', '#F44336',   // Red for severe
+                  '#4CAF50'              // Default color
+                ]
+              }
+            });
           }
           
-          // Add a GeoJSON source for the driver's path
-          map.current.addSource(`path-source-${driver.id}`, {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              properties: {},
-              geometry: {
-                type: 'LineString',
-                coordinates: driverPathCoordinates.current[driver.id]
+          // Initialize path sources and layers for each driver
+          drivers.forEach(driver => {
+            if (!map.current) return;
+            
+            // Initialize the coordinates array if it doesn't exist
+            if (!driverPathCoordinates.current[driver.id]) {
+              driverPathCoordinates.current[driver.id] = [
+                [driver.location.lng, driver.location.lat]
+              ];
+            }
+            
+            // Add a GeoJSON source for the driver's path
+            map.current.addSource(`path-source-${driver.id}`, {
+              type: 'geojson',
+              data: {
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                  type: 'LineString',
+                  coordinates: driverPathCoordinates.current[driver.id]
+                }
               }
-            }
-          });
-          
-          // Save the source reference
-          driverPaths.current[driver.id] = map.current.getSource(`path-source-${driver.id}`) as mapboxgl.GeoJSONSource;
-          
-          // Add a path layer for the driver
-          const color = driver.id === '1' ? '#FF5733' : 
-                        driver.id === '2' ? '#33FF57' : 
-                        driver.id === '3' ? '#3357FF' : '#FFBD33';
-          
-          map.current.addLayer({
-            id: `path-layer-${driver.id}`,
-            type: 'line',
-            source: `path-source-${driver.id}`,
-            layout: {
-              'line-join': 'round',
-              'line-cap': 'round',
-              'visibility': driver.id === selectedDriverId || selectedDriverId === null ? 'visible' : 'none'
-            },
-            paint: {
-              'line-color': color,
-              'line-width': 4,
-              'line-opacity': 0.8
-            }
+            });
+            
+            // Save the source reference
+            driverPaths.current[driver.id] = map.current.getSource(`path-source-${driver.id}`) as mapboxgl.GeoJSONSource;
+            
+            // Add a path layer for the driver
+            const color = driver.id === '1' ? '#FF5733' : 
+                          driver.id === '2' ? '#33FF57' : 
+                          driver.id === '3' ? '#3357FF' : '#FFBD33';
+            
+            map.current.addLayer({
+              id: `path-layer-${driver.id}`,
+              type: 'line',
+              source: `path-source-${driver.id}`,
+              layout: {
+                'line-join': 'round',
+                'line-cap': 'round',
+                'visibility': driver.id === selectedDriverId || selectedDriverId === null ? 'visible' : 'none'
+              },
+              paint: {
+                'line-color': color,
+                'line-width': 4,
+                'line-opacity': 0.8
+              }
+            });
           });
         });
-      });
 
-      // Add click event for markers
-      map.current.on('click', (e) => {
-        // Check if a marker was clicked
-        const features = map.current?.queryRenderedFeatures(e.point, {
-          layers: drivers.map(d => `path-layer-${d.id}`)
+        // Add click event for markers
+        map.current.on('click', (e) => {
+          // Check if a marker was clicked
+          const features = map.current?.queryRenderedFeatures(e.point, {
+            layers: drivers.map(d => `path-layer-${d.id}`)
+          });
+          
+          if (features && features.length > 0) {
+            const clickedDriverId = features[0].layer.id.replace('path-layer-', '');
+            setActiveDriverDetails(clickedDriverId);
+          } else {
+            // Clicked on the map but not on a driver path
+            setActiveDriverDetails(null);
+          }
+        });
+
+        // Debug the map load process
+        map.current.on('error', (e) => {
+          console.error('Mapbox GL error:', e);
         });
         
-        if (features && features.length > 0) {
-          const clickedDriverId = features[0].layer.id.replace('path-layer-', '');
-          setActiveDriverDetails(clickedDriverId);
-        } else {
-          // Clicked on the map but not on a driver path
-          setActiveDriverDetails(null);
-        }
-      });
-    }).catch(error => {
-      console.error('Error loading mapbox-gl:', error);
-    });
+        console.log('Map instance created');
+      } catch (error) {
+        console.error('Error initializing mapbox-gl:', error);
+      }
+    }, 500); // 500ms delay to ensure container is ready
   };
 
   useEffect(() => {
-    if (mapboxToken) {
+    // Force the container to have dimensions 
+    if (mapContainer.current) {
+      console.log('Setting explicit dimensions on map container');
+      mapContainer.current.style.width = '100%';
+      mapContainer.current.style.height = '540px';
+    }
+    
+    if (mapboxToken && !mapInitialized) {
+      console.log('Initializing map with token');
       initializeMap();
     }
 
@@ -233,7 +255,14 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
         map.current = null;
       }
     };
-  }, [mapboxToken, showSatellite]);
+  }, [mapboxToken, mapInitialized]);
+
+  // Re-initialize map when switching to mapbox tab
+  useEffect(() => {
+    if (mapboxToken && !mapInitialized) {
+      initializeMap();
+    }
+  }, []);
 
   // Update traffic layer visibility
   useEffect(() => {
@@ -342,7 +371,7 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
         }
       });
     });
-  }, [showSatellite]);
+  }, [showSatellite, mapLoaded]);
 
   // Update path visibility when selected driver changes
   useEffect(() => {
@@ -584,6 +613,7 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
   const handleTokenSubmit = (token: string) => {
     localStorage.setItem('mapbox_token', token);
     setMapboxToken(token);
+    setMapInitialized(false); // Reset initialization flag to trigger re-init
   };
 
   // Find the active driver for details toolbar
@@ -606,7 +636,7 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
       id="map-container"
       className={`h-full w-full relative rounded-b-lg ${isFullScreen ? 'fixed inset-0 z-50 bg-background rounded-none' : ''}`}
     >
-      <div ref={mapContainer} className="h-full w-full rounded-b-lg" />
+      <div ref={mapContainer} className="h-full w-full rounded-b-lg" style={{minHeight: "540px"}} />
       
       <MapLayersControl 
         mapType="mapbox"
