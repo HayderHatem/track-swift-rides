@@ -19,6 +19,7 @@ export interface Driver {
   prevLocation?: Location;  // Added prevLocation as an optional property
   phone?: string;
   currentDelivery: Delivery | null;
+  lastUpdate?: number; // Timestamp of last location update
 }
 
 export interface FlutterDriverUpdate {

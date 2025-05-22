@@ -1,10 +1,12 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Driver } from '@/types/tracking';
-import { Map as MapIcon, Navigation } from 'lucide-react';
+import { Map as MapIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import MapLayersControl from './MapLayersControl';
+import DriverDetailToolbar from './DriverDetailToolbar';
 
 interface MapViewProps {
   drivers: Driver[];
@@ -50,9 +52,45 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
     localStorage.getItem('mapbox_token')
   );
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [showTraffic, setShowTraffic] = useState(true);
+  const [showSatellite, setShowSatellite] = useState(false);
+  const [activeDriverDetails, setActiveDriverDetails] = useState<string | null>(null);
 
   // Baghdad, Iraq coordinates as default
   const defaultCenter = [44.3661, 33.3152]; // [lng, lat]
+
+  const toggleFullScreen = () => {
+    const mapElement = document.getElementById('map-container');
+    
+    if (!mapElement) return;
+
+    if (!document.fullscreenElement) {
+      if (mapElement.requestFullscreen) {
+        mapElement.requestFullscreen()
+          .then(() => setIsFullScreen(true))
+          .catch(err => console.error(`Error attempting to enable full-screen mode: ${err.message}`));
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen()
+          .then(() => setIsFullScreen(false))
+          .catch(err => console.error(`Error attempting to exit full-screen mode: ${err.message}`));
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullScreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
 
   const initializeMap = () => {
     if (!mapboxToken || !mapContainer.current) return;
@@ -66,17 +104,48 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
       
       map.current = new mapboxgl.default.Map({
         container: mapContainer.current,
-        style: 'mapbox://styles/mapbox/streets-v11',
+        style: showSatellite ? 'mapbox://styles/mapbox/satellite-streets-v11' : 'mapbox://styles/mapbox/streets-v11',
         center: drivers.length > 0 
           ? [drivers[0].location.lng, drivers[0].location.lat]
           : defaultCenter,
         zoom: 12
       });
 
-      map.current.addControl(new mapboxgl.default.NavigationControl(), 'top-right');
+      map.current.addControl(new mapboxgl.default.NavigationControl(), 'bottom-right');
       
       map.current.on('load', () => {
         setMapLoaded(true);
+        
+        // Add traffic layer if enabled
+        if (showTraffic) {
+          map.current?.addSource('traffic', {
+            type: 'vector',
+            url: 'mapbox://mapbox.mapbox-traffic-v1'
+          });
+          
+          map.current?.addLayer({
+            'id': 'traffic-data',
+            'type': 'line',
+            'source': 'traffic',
+            'source-layer': 'traffic',
+            'layout': {
+              'line-join': 'round',
+              'line-cap': 'round'
+            },
+            'paint': {
+              'line-width': 2,
+              'line-color': [
+                'match',
+                ['get', 'congestion'],
+                'low', '#4CAF50',      // Green for low traffic
+                'moderate', '#FFEB3B', // Yellow for moderate
+                'heavy', '#FF9800',    // Orange for heavy
+                'severe', '#F44336',   // Red for severe
+                '#4CAF50'              // Default color
+              ]
+            }
+          });
+        }
         
         // Initialize path sources and layers for each driver
         drivers.forEach(driver => {
@@ -127,14 +196,25 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
           });
         });
       });
+
+      // Add click event for markers
+      map.current.on('click', (e) => {
+        // Check if a marker was clicked
+        const features = map.current?.queryRenderedFeatures(e.point, {
+          layers: drivers.map(d => `path-layer-${d.id}`)
+        });
+        
+        if (features && features.length > 0) {
+          const clickedDriverId = features[0].layer.id.replace('path-layer-', '');
+          setActiveDriverDetails(clickedDriverId);
+        } else {
+          // Clicked on the map but not on a driver path
+          setActiveDriverDetails(null);
+        }
+      });
     }).catch(error => {
       console.error('Error loading mapbox-gl:', error);
     });
-  };
-
-  const handleTokenSubmit = (token: string) => {
-    localStorage.setItem('mapbox_token', token);
-    setMapboxToken(token);
   };
 
   useEffect(() => {
@@ -153,7 +233,116 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
         map.current = null;
       }
     };
-  }, [mapboxToken]);
+  }, [mapboxToken, showSatellite]);
+
+  // Update traffic layer visibility
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+    
+    if (map.current.getSource('traffic')) {
+      if (showTraffic) {
+        map.current.setLayoutProperty('traffic-data', 'visibility', 'visible');
+      } else {
+        map.current.setLayoutProperty('traffic-data', 'visibility', 'none');
+      }
+    }
+  }, [showTraffic, mapLoaded]);
+
+  // Update the map style when satellite mode changes
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+    
+    const style = showSatellite 
+      ? 'mapbox://styles/mapbox/satellite-streets-v11'
+      : 'mapbox://styles/mapbox/streets-v11';
+    
+    map.current.setStyle(style);
+    
+    // Need to re-add data sources and layers after style change
+    map.current.once('styledata', () => {
+      // Re-add traffic layer if needed
+      if (showTraffic) {
+        if (!map.current?.getSource('traffic')) {
+          map.current?.addSource('traffic', {
+            type: 'vector',
+            url: 'mapbox://mapbox.mapbox-traffic-v1'
+          });
+          
+          map.current?.addLayer({
+            'id': 'traffic-data',
+            'type': 'line',
+            'source': 'traffic',
+            'source-layer': 'traffic',
+            'layout': {
+              'line-join': 'round',
+              'line-cap': 'round'
+            },
+            'paint': {
+              'line-width': 2,
+              'line-color': [
+                'match',
+                ['get', 'congestion'],
+                'low', '#4CAF50',
+                'moderate', '#FFEB3B',
+                'heavy', '#FF9800',
+                'severe', '#F44336',
+                '#4CAF50'
+              ]
+            }
+          });
+        }
+      }
+      
+      // Re-add driver paths
+      drivers.forEach(driver => {
+        if (!map.current) return;
+        
+        if (!driverPathCoordinates.current[driver.id]) {
+          driverPathCoordinates.current[driver.id] = [
+            [driver.location.lng, driver.location.lat]
+          ];
+        }
+        
+        // Re-add the source if it doesn't exist
+        if (!map.current.getSource(`path-source-${driver.id}`)) {
+          map.current.addSource(`path-source-${driver.id}`, {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: driverPathCoordinates.current[driver.id]
+              }
+            }
+          });
+          
+          driverPaths.current[driver.id] = map.current.getSource(`path-source-${driver.id}`) as mapboxgl.GeoJSONSource;
+          
+          // Add the layer again
+          const color = driver.id === '1' ? '#FF5733' : 
+                        driver.id === '2' ? '#33FF57' : 
+                        driver.id === '3' ? '#3357FF' : '#FFBD33';
+          
+          map.current.addLayer({
+            id: `path-layer-${driver.id}`,
+            type: 'line',
+            source: `path-source-${driver.id}`,
+            layout: {
+              'line-join': 'round',
+              'line-cap': 'round',
+              'visibility': driver.id === selectedDriverId || selectedDriverId === null ? 'visible' : 'none'
+            },
+            paint: {
+              'line-color': color,
+              'line-width': 4,
+              'line-opacity': 0.8
+            }
+          });
+        }
+      });
+    });
+  }, [showSatellite]);
 
   // Update path visibility when selected driver changes
   useEffect(() => {
@@ -169,6 +358,11 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
         );
       }
     });
+    
+    // Show driver details for selected driver
+    if (selectedDriverId) {
+      setActiveDriverDetails(selectedDriverId);
+    }
   }, [selectedDriverId, mapLoaded, drivers]);
 
   // Function to smoothly animate a marker from one position to another
@@ -238,6 +432,13 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
     return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
   };
 
+  // Check if a driver has not received updates recently
+  const isDriverStale = (driver: Driver) => {
+    if (!driver.lastUpdate) return false;
+    const now = Date.now();
+    return now - driver.lastUpdate > 2 * 60 * 1000; // 2 minutes
+  };
+
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
@@ -251,28 +452,19 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
         const el = document.createElement('div');
         el.className = 'driver-marker';
         el.innerHTML = `
-          <div class="w-10 h-10 rounded-full bg-${status === 'active' ? 'green' : 'gray'}-500 flex items-center justify-center text-white font-bold border-2 border-white shadow-lg">
+          <div class="w-10 h-10 rounded-full ${isDriverStale(driver) ? 'bg-red-500' : status === 'active' ? 'bg-green-500' : 'bg-gray-400'} flex items-center justify-center text-white font-bold border-2 border-white shadow-lg">
             ${driver.name.charAt(0)}
           </div>
         `;
         
+        // Create marker click handler
+        el.addEventListener('click', () => {
+          setActiveDriverDetails(id);
+        });
+        
         // Create the marker
         import('mapbox-gl').then((mapboxgl) => {
           markers.current[id] = new mapboxgl.default.Marker(el)
-            .setLngLat([location.lng, location.lat])
-            .addTo(map.current as mapboxgl.Map);
-            
-          // Add popup
-          new mapboxgl.default.Popup({ offset: 25, closeButton: false })
-            .setHTML(`
-              <div>
-                <strong>${driver.name}</strong>
-                <div>${driver.vehicle}</div>
-                ${driver.currentDelivery ? 
-                  `<div class="text-sm">Delivering to: ${driver.currentDelivery.address}</div>` : 
-                  '<div class="text-sm">Not on delivery</div>'}
-              </div>
-            `)
             .setLngLat([location.lng, location.lat])
             .addTo(map.current as mapboxgl.Map);
             
@@ -322,6 +514,22 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
           }
         });
       } else {
+        // Update marker color based on status and staleness
+        const markerEl = markers.current[id].getElement().querySelector('div');
+        if (markerEl) {
+          // Remove all bg color classes
+          markerEl.classList.remove('bg-green-500', 'bg-gray-400', 'bg-red-500');
+          
+          // Add appropriate color class
+          if (isDriverStale(driver)) {
+            markerEl.classList.add('bg-red-500');
+          } else if (status === 'active') {
+            markerEl.classList.add('bg-green-500');
+          } else {
+            markerEl.classList.add('bg-gray-400');
+          }
+        }
+        
         // Animate marker to new position
         const currentPos = markers.current[id].getLngLat();
         animateMarkerMovement(
@@ -373,6 +581,16 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
     }
   }, [drivers, selectedDriverId, mapLoaded]);
 
+  const handleTokenSubmit = (token: string) => {
+    localStorage.setItem('mapbox_token', token);
+    setMapboxToken(token);
+  };
+
+  // Find the active driver for details toolbar
+  const activeDriver = activeDriverDetails 
+    ? drivers.find(d => d.id === activeDriverDetails)
+    : null;
+
   if (!mapboxToken) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -384,7 +602,32 @@ const MapView = ({ drivers, selectedDriverId }: MapViewProps) => {
   }
 
   return (
-    <div ref={mapContainer} className="h-full w-full rounded-b-lg" />
+    <div 
+      id="map-container"
+      className={`h-full w-full relative rounded-b-lg ${isFullScreen ? 'fixed inset-0 z-50 bg-background rounded-none' : ''}`}
+    >
+      <div ref={mapContainer} className="h-full w-full rounded-b-lg" />
+      
+      <MapLayersControl 
+        mapType="mapbox"
+        isFullScreen={isFullScreen}
+        onMapTypeChange={() => {}} // Handled in parent component
+        onToggleFullScreen={toggleFullScreen}
+        showTraffic={showTraffic}
+        showSatellite={showSatellite}
+        onToggleTraffic={() => setShowTraffic(!showTraffic)}
+        onToggleSatellite={() => setShowSatellite(!showSatellite)}
+      />
+      
+      {activeDriver && (
+        <div className="absolute bottom-0 left-0 right-0">
+          <DriverDetailToolbar 
+            driver={activeDriver} 
+            onClose={() => setActiveDriverDetails(null)} 
+          />
+        </div>
+      )}
+    </div>
   );
 };
 

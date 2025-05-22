@@ -1,8 +1,11 @@
+
 import React, { useEffect, useState } from 'react';
 import MapView from '@/components/tracking/MapView';
+import WazeMap from '@/components/tracking/WazeMap';
 import DriversList from '@/components/tracking/DriversList';
 import { Driver, FlutterDriverUpdate } from '@/types/tracking';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +18,7 @@ const DriverTracking = () => {
   const [wsUrl, setWsUrl] = useState<string>('wss://demo.piesocket.com/v3/channel_123?api_key=VCXCEuvhGcBDP7XhiJJUDvR1e1D3eiVjgZ9VRiaV&notify_self');
   const [inputWsUrl, setInputWsUrl] = useState<string>('');
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const [mapType, setMapType] = useState<'mapbox' | 'waze'>('mapbox');
   
   const { lastMessage, connectionStatus, reconnect } = useWebSocket({
     url: wsUrl,
@@ -53,7 +57,8 @@ const DriverTracking = () => {
         location: { lat, lng },
         name: name || drivers.find(d => d.id === id)!.name,
         phone: phone || drivers.find(d => d.id === id)!.phone,
-        status: 'active'
+        status: 'active',
+        lastUpdate: Date.now() // Add timestamp of last update
       };
       updateDriverLocation(updatedDriver);
     } 
@@ -66,6 +71,7 @@ const DriverTracking = () => {
         vehicle: 'Unknown Vehicle',
         status: 'active',
         location: { lat, lng },
+        lastUpdate: Date.now(),
         currentDelivery: null
       };
       
@@ -99,6 +105,7 @@ const DriverTracking = () => {
         status: 'active',
         phone: '+964 750 123 4567',
         location: { lat: baghdadLat, lng: baghdadLng },
+        lastUpdate: Date.now(),
         currentDelivery: {
           id: 'del-123',
           address: 'Karrada, Baghdad, Iraq',
@@ -112,6 +119,7 @@ const DriverTracking = () => {
         status: 'active',
         phone: '+964 770 987 6543',
         location: { lat: baghdadLat + 0.01, lng: baghdadLng + 0.01 },
+        lastUpdate: Date.now(),
         currentDelivery: {
           id: 'del-456',
           address: 'Mansour, Baghdad, Iraq',
@@ -125,6 +133,7 @@ const DriverTracking = () => {
         status: 'inactive',
         phone: '+964 780 456 7890',
         location: { lat: baghdadLat - 0.01, lng: baghdadLng + 0.02 },
+        lastUpdate: Date.now() - (3 * 60 * 1000), // 3 minutes ago (will be stale)
         currentDelivery: null
       }
     ];
@@ -150,7 +159,8 @@ const DriverTracking = () => {
             location: {
               lat: driver.location.lat + latChange,
               lng: driver.location.lng + lngChange
-            }
+            },
+            lastUpdate: Date.now() // Update the timestamp
           };
         })
       );
@@ -170,12 +180,16 @@ const DriverTracking = () => {
           ...updatedDrivers[existingDriverIndex],
           ...updatedDriver,
           prevLocation: updatedDrivers[existingDriverIndex].location,
+          lastUpdate: Date.now() // Add timestamp of update
         };
         return updatedDrivers;
       } else {
         // Add as new driver
         toast.success(`New driver connected: ${updatedDriver.name}`);
-        return [...prev, updatedDriver];
+        return [...prev, {
+          ...updatedDriver,
+          lastUpdate: Date.now() // Add timestamp
+        }];
       }
     });
   };
@@ -183,10 +197,6 @@ const DriverTracking = () => {
   const handleDriverSelect = (driverId: string) => {
     setSelectedDriver(driverId);
   };
-
-  const selectedDriverData = selectedDriver 
-    ? drivers.find(d => d.id === selectedDriver) 
-    : null;
 
   return (
     <div className="container mx-auto py-6">
@@ -239,10 +249,32 @@ const DriverTracking = () => {
               <CardTitle>Live Map</CardTitle>
             </CardHeader>
             <CardContent className="p-0 h-[540px]">
-              <MapView 
-                drivers={drivers} 
-                selectedDriverId={selectedDriver}
-              />
+              <Tabs 
+                defaultValue="mapbox"
+                value={mapType}
+                onValueChange={(value) => setMapType(value as 'mapbox' | 'waze')}
+              >
+                <div className="px-6 pt-2">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="mapbox">MapBox</TabsTrigger>
+                    <TabsTrigger value="waze">Waze Traffic</TabsTrigger>
+                  </TabsList>
+                </div>
+                
+                <TabsContent value="mapbox" className="h-full">
+                  <MapView 
+                    drivers={drivers} 
+                    selectedDriverId={selectedDriver}
+                  />
+                </TabsContent>
+                
+                <TabsContent value="waze" className="h-full">
+                  <WazeMap 
+                    drivers={drivers} 
+                    selectedDriverId={selectedDriver}
+                  />
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
         </div>

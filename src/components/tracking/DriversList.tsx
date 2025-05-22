@@ -1,9 +1,10 @@
 
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { Driver } from '@/types/tracking';
-import { Car, MapPin, Navigation2, Clock, Phone } from 'lucide-react';
+import { Car, MapPin, Navigation2, Clock, Phone, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 
 interface DriversListProps {
   drivers: Driver[];
@@ -12,6 +13,8 @@ interface DriversListProps {
 }
 
 const DriversList = ({ drivers, onDriverSelect, selectedDriverId }: DriversListProps) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  
   // Format the estimated arrival time
   const formatArrivalTime = (isoString: string) => {
     const date = new Date(isoString);
@@ -26,15 +29,45 @@ const DriversList = ({ drivers, onDriverSelect, selectedDriverId }: DriversListP
     
     return diffMinutes > 0 ? `${diffMinutes} min` : 'Arriving';
   };
+  
+  // Check if driver is stale (no updates in the last 2 minutes)
+  const isDriverStale = (driver: Driver) => {
+    if (!driver.lastUpdate) return false;
+    const now = Date.now();
+    return now - driver.lastUpdate > 2 * 60 * 1000; // 2 minutes
+  };
+
+  // Filter drivers based on search query
+  const filteredDrivers = useMemo(() => {
+    if (!searchQuery) return drivers;
+    
+    const query = searchQuery.toLowerCase();
+    return drivers.filter(driver => 
+      driver.name.toLowerCase().includes(query) || 
+      driver.vehicle.toLowerCase().includes(query) ||
+      (driver.phone && driver.phone.includes(query)) ||
+      (driver.currentDelivery && driver.currentDelivery.address.toLowerCase().includes(query))
+    );
+  }, [drivers, searchQuery]);
 
   return (
     <div className="space-y-4">
-      {drivers.length === 0 ? (
+      <div className="relative">
+        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Search drivers..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pl-9"
+        />
+      </div>
+      
+      {filteredDrivers.length === 0 ? (
         <div className="text-center p-4">
-          <p>No drivers available</p>
+          <p>No drivers found</p>
         </div>
       ) : (
-        drivers.map(driver => (
+        filteredDrivers.map(driver => (
           <div 
             key={driver.id}
             className={`p-4 border rounded-lg transition-colors ${
@@ -46,6 +79,7 @@ const DriversList = ({ drivers, onDriverSelect, selectedDriverId }: DriversListP
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center">
                 <div className={`w-3 h-3 rounded-full mr-2 ${
+                  isDriverStale(driver) ? 'bg-red-500' :
                   driver.status === 'active' ? 'bg-green-500' : 'bg-gray-400'
                 }`}></div>
                 <h3 className="font-medium">{driver.name}</h3>
